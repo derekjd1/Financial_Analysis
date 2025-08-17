@@ -14,7 +14,6 @@ import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 
-# PDF export
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
@@ -23,15 +22,14 @@ from reportlab.pdfgen import canvas
 # DB helpers
 from database import get_conn, add_favorite, remove_favorite, list_favorites
 
-# Optional: Yahoo search
+# Yahoo search
 try:
     import requests  # noqa: F401
     HAS_REQUESTS = True
 except Exception:
     HAS_REQUESTS = False
 
-
-# ───────────── Search helpers ───────────── #
+# Search Functions 
 
 @st.cache_data(show_spinner=False, ttl=300)
 def search_symbols(query: str) -> List[Dict]:
@@ -54,8 +52,7 @@ def search_symbols(query: str) -> List[Dict]:
         return []
 
 
-# ───────────── Date ranges ───────────── #
-
+# Date Ranges
 def _ytd_range(today: date) -> Tuple[date, date]:
     return date(today.year, 1, 1), today
 
@@ -82,8 +79,7 @@ def compute_date_range(label: str, today: Optional[date] = None) -> Tuple[Option
     return None, None, None
 
 
-# ───────────── Data fetch ───────────── #
-
+# Fetch the data
 @st.cache_data(show_spinner=True)
 def get_history(symbol: str,
                 start: Optional[date],
@@ -119,8 +115,7 @@ def get_history(symbol: str,
     return df
 
 
-# ───────────── Metrics & base chart ───────────── #
-
+# Base chart and information / metrics
 def pct(x: Optional[float]) -> str:
     return f"{x*100:.2f}%" if x is not None else "—"
 
@@ -173,8 +168,7 @@ def make_chart(df: pd.DataFrame, title: str, chart_type: str, log_scale: bool, s
     return fig
 
 
-# ───────────── Compare & Analytics helpers ───────────── #
-
+# Function to compare Analytics
 def get_prices_for(symbols, start, end, period, interval, auto_adjust):
     """Fetch Adj Close for many symbols and align into one DataFrame."""
     frames = {}
@@ -256,8 +250,7 @@ def rolling_vol_chart(df: pd.DataFrame, window: int, symbol: str) -> go.Figure:
     return fig
 
 
-# ───────────── PDF generation ───────────── #
-
+# Function to generate / download a PDF report
 def _fig_to_imgreader(fig: go.Figure) -> Optional[ImageReader]:
     """Convert Plotly figure to an ImageReader using kaleido."""
     try:
@@ -337,8 +330,7 @@ def generate_pdf_report(symbol: str,
     return buf.getvalue()
 
 
-# ───────────── UI ───────────── #
-
+# UI section
 st.set_page_config(page_title="Finance Analyzer", page_icon="📈", layout="wide")
 st.title("📈 Finance Analyzer — Stocks & ETFs")
 
@@ -487,7 +479,7 @@ with right:
             use_container_width=True
         )
 
-# ── Analytics tabs ────────────────────────────────────────────────────────
+# Analytics tabs
 st.divider()
 tab1, tab2, tab3 = st.tabs(["🔀 Compare", "📅 Annual Returns", "📈 Rolling Vol"])
 
@@ -529,7 +521,7 @@ with tab3:
     fig_rolling = rolling_vol_chart(hist, rolling_win, selected_symbol)
     st.plotly_chart(fig_rolling, use_container_width=True)
 
-# ── PDF report button ─────────────────────────────────────────────────────
+# PDF report button
 st.divider()
 if hist.empty:
     st.disabled = True

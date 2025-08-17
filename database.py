@@ -1,4 +1,4 @@
-# new.py — SQLite helpers for favorites list
+# database.py — SQLite helpers for favorites list
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import os
 import sqlite3
 from contextlib import closing
 from typing import Optional
-
 import pandas as pd
 import streamlit as st
 
