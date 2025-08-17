@@ -1,0 +1,7 @@
+streamlit
+yfinance
+watchdog
+plotly
+pandas
+numpy
+requests

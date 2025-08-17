@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.so
+
+# Virtual envs
+.venv/
+venv/
+.env
+*.env
+
+# macOS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Databases & app data
+favorites.db
+*.sqlite
+*.sqlite3
+
+# Editors/IDEs
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Caches & logs
+.cache/
+*.log
