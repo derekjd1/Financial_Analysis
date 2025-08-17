@@ -1,10 +1,11 @@
-# app.py — Streamlit Finance Analyzer (with SQLite Favorites in new.py)
+# app.py — Streamlit Finance Analyzer (with Favorites, Compare, Heatmap, Rolling Vol, PDF export)
 # Run: streamlit run app.py
 
 from __future__ import annotations
 
 import math
-from datetime import date, timedelta
+from io import BytesIO
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -12,6 +13,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
+
+# PDF export
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 
 # DB helpers
 from database import get_conn, add_favorite, remove_favorite, list_favorites
@@ -112,9 +119,9 @@ def get_history(symbol: str,
     return df
 
 
-# ───────────── Metrics & chart ───────────── #
+# ───────────── Metrics & base chart ───────────── #
 
-def pct(x: float) -> str:
+def pct(x: Optional[float]) -> str:
     return f"{x*100:.2f}%" if x is not None else "—"
 
 def compute_metrics(df: pd.DataFrame):
@@ -164,6 +171,170 @@ def make_chart(df: pd.DataFrame, title: str, chart_type: str, log_scale: bool, s
     )
     fig.update_yaxes(type="log" if log_scale else "linear")
     return fig
+
+
+# ───────────── Compare & Analytics helpers ───────────── #
+
+def get_prices_for(symbols, start, end, period, interval, auto_adjust):
+    """Fetch Adj Close for many symbols and align into one DataFrame."""
+    frames = {}
+    for s in symbols:
+        df = get_history(s, start, end, period, interval, auto_adjust)
+        if not df.empty and "Adj Close" in df:
+            frames[s.upper()] = df["Adj Close"].rename(s.upper())
+    if not frames:
+        return pd.DataFrame()
+    prices = pd.concat(frames.values(), axis=1).dropna(how="all")
+    return prices
+
+def make_compare_chart(prices: pd.DataFrame, title: str) -> go.Figure:
+    """Normalize series to 100 at the first common date and plot."""
+    fig = go.Figure()
+    if prices.empty:
+        fig.update_layout(title="No data for comparison")
+        return fig
+    prices = prices.dropna()
+    base = prices.iloc[0]
+    norm = (prices / base) * 100.0
+    for col in norm.columns:
+        fig.add_trace(go.Scatter(x=norm.index, y=norm[col], mode="lines", name=col))
+    fig.update_layout(
+        title=title + " (Indexed to 100)",
+        xaxis_title="Date",
+        yaxis_title="Index (Start = 100)",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=40, r=30, t=60, b=40),
+    )
+    return fig
+
+def annual_returns(df: pd.DataFrame) -> pd.Series:
+    """Compute annual total returns from Adj Close for one symbol history."""
+    if df.empty or "Adj Close" not in df:
+        return pd.Series(dtype="float64")
+    yearly_last = df["Adj Close"].resample("Y").last()
+    returns = yearly_last.pct_change().dropna()
+    returns.index = returns.index.year
+    return returns
+
+def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
+    """Single-row heatmap of annual returns."""
+    if returns.empty:
+        fig = go.Figure()
+        fig.update_layout(title="No annual returns to display")
+        return fig
+    years = list(returns.index.astype(str))
+    z = [list(returns.values * 100.0)]  # percent
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z, x=years, y=[symbol.upper()],
+            colorscale="RdYlGn", zmid=0, colorbar=dict(title="Return %")
+        )
+    )
+    fig.update_layout(
+        title=f"{symbol.upper()} — Annual Returns",
+        xaxis_title="Year", yaxis_title="",
+        margin=dict(l=40, r=30, t=60, b=40),
+    )
+    return fig
+
+def rolling_vol_chart(df: pd.DataFrame, window: int, symbol: str) -> go.Figure:
+    """Annualized rolling volatility from daily returns."""
+    fig = go.Figure()
+    if df.empty or "Adj Close" not in df:
+        fig.update_layout(title="No data for rolling stats")
+        return fig
+    daily = df["Adj Close"].pct_change().dropna()
+    roll_vol = daily.rolling(window).std() * np.sqrt(252)
+    fig.add_trace(go.Scatter(x=roll_vol.index, y=roll_vol, mode="lines", name=f"Rolling vol ({window}d)"))
+    fig.update_layout(
+        title=f"{symbol.upper()} — Rolling Volatility ({window} day)",
+        xaxis_title="Date", yaxis_title="Annualized Volatility",
+        hovermode="x unified",
+        margin=dict(l=40, r=30, t=60, b=40),
+    )
+    return fig
+
+
+# ───────────── PDF generation ───────────── #
+
+def _fig_to_imgreader(fig: go.Figure) -> Optional[ImageReader]:
+    """Convert Plotly figure to an ImageReader using kaleido."""
+    try:
+        png = fig.to_image(format="png", scale=2)  # requires 'kaleido'
+        return ImageReader(BytesIO(png))
+    except Exception as e:
+        st.error("Failed to render chart image. Ensure `kaleido` is installed.")
+        st.exception(e)
+        return None
+
+def generate_pdf_report(symbol: str,
+                        range_choice: str,
+                        metrics: Dict[str, Optional[float]],
+                        fig_main: go.Figure,
+                        fig_returns: Optional[go.Figure],
+                        fig_rolling: Optional[go.Figure]) -> bytes:
+    """Build a multi-page PDF and return bytes."""
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    W, H = letter
+    M = 0.6 * inch
+
+    # Header
+    y = H - M
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(M, y, f"Finance Report: {symbol.upper()}")
+    c.setFont("Helvetica", 10)
+    c.drawString(M, y - 14, f"Range: {range_choice}")
+    c.drawString(M, y - 28, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    y -= 44
+
+    # Metrics block
+    lines = [
+        f"Last Price: see chart tooltip for most recent close",
+        f"Total Return: {pct(metrics.get('return_pct'))}",
+        f"CAGR: {pct(metrics.get('cagr'))}",
+        f"Volatility (ann.): {pct(metrics.get('volatility'))}",
+        f"Max Drawdown: {pct(metrics.get('max_drawdown'))}",
+    ]
+    c.setFont("Helvetica", 11)
+    for ln in lines:
+        c.drawString(M, y, ln)
+        y -= 14
+    y -= 6
+
+    # Helper to place a figure
+    def place_fig(figure: go.Figure, title: str, y_pos: float) -> float:
+        imgR = _fig_to_imgreader(figure)
+        if imgR is None:
+            return y_pos
+        iw, ih = imgR.getSize()
+        max_w = W - 2 * M
+        tgt_h = (max_w * ih) / iw
+        if tgt_h > (y_pos - M - 32):
+            # new page if it won't fit
+            c.showPage()
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(M, H - M, title)
+            y_loc = H - M - 18
+        else:
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(M, y_pos - 14, title)
+            y_loc = y_pos - 18
+        c.drawImage(imgR, M, y_loc - tgt_h, width=max_w, height=tgt_h, preserveAspectRatio=True, mask='auto')
+        return y_loc - tgt_h - 16
+
+    # Add charts
+    y = place_fig(fig_main, "Price Chart", y)
+    if fig_returns is not None:
+        y = place_fig(fig_returns, "Annual Returns", y)
+    if fig_rolling is not None:
+        y = place_fig(fig_rolling, "Rolling Volatility", y)
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
 
 
 # ───────────── UI ───────────── #
@@ -273,14 +444,16 @@ left, right = st.columns((7, 5))
 with left:
     if hist.empty:
         st.warning("No price data returned. Double-check the symbol and range.")
+        fig_main = go.Figure()
     else:
-        fig = make_chart(hist, f"{selected_symbol} — {range_choice}", chart_type, log_scale, show_sma)
-        st.plotly_chart(fig, use_container_width=True)
+        fig_main = make_chart(hist, f"{selected_symbol} — {range_choice}", chart_type, log_scale, show_sma)
+        st.plotly_chart(fig_main, use_container_width=True)
 
 with right:
     st.subheader("Quick Stats")
     if hist.empty:
         st.info("Stats will appear here once data loads.")
+        metrics = {"return_pct": None, "cagr": None, "volatility": None, "max_drawdown": None}
     else:
         metrics = compute_metrics(hist)
         last_price = float(hist["Adj Close"].iloc[-1]) if "Adj Close" in hist else float(hist["Close"].iloc[-1])
@@ -314,10 +487,79 @@ with right:
             use_container_width=True
         )
 
+# ── Analytics tabs ────────────────────────────────────────────────────────
+st.divider()
+tab1, tab2, tab3 = st.tabs(["🔀 Compare", "📅 Annual Returns", "📈 Rolling Vol"])
+
+with tab1:
+    st.caption("Compare multiple tickers by normalizing each to 100 at the start date.")
+    fav_options = favs.symbol.tolist() if 'favs' in globals() and not favs.empty else []
+    compare_favs = st.multiselect("Pick favorites to compare", options=fav_options, default=[])
+    manual = st.text_input("Or enter tickers (comma-separated)", placeholder="e.g., VOO, VTI, QQQ")
+
+    manual_syms = [s.strip().upper() for s in manual.split(",") if s.strip()] if manual else []
+    symbols = [selected_symbol.upper()] + [s.upper() for s in compare_favs] + manual_syms
+    seen = set()
+    symbols = [s for s in symbols if not (s in seen or seen.add(s))]
+
+    if len(symbols) <= 1:
+        st.info("Add at least one more symbol to compare.")
+        fig_compare = None
+    else:
+        with st.spinner(f"Comparing: {', '.join(symbols)}"):
+            prices = get_prices_for(symbols, start, end, period, interval, auto_adjust)
+        fig_compare = make_compare_chart(prices, "Relative Performance")
+        st.plotly_chart(fig_compare, use_container_width=True)
+
+with tab2:
+    st.caption("Year-by-year total returns calculated from adjusted close.")
+    rets = annual_returns(hist)
+    if rets.empty:
+        st.info("Not enough data to compute annual returns for this selection.")
+        fig_returns = None
+    else:
+        fig_returns = make_returns_heatmap(rets, selected_symbol)
+        st.plotly_chart(fig_returns, use_container_width=True)
+        df_rets = pd.DataFrame({"Year": rets.index, "Return %": (rets.values * 100).round(2)})
+        st.dataframe(df_rets, use_container_width=True, hide_index=True)
+
+with tab3:
+    st.caption("Rolling annualized volatility from daily returns.")
+    rolling_win = st.slider("Window (days)", min_value=20, max_value=250, value=60, step=5, key="rolling_win")
+    fig_rolling = rolling_vol_chart(hist, rolling_win, selected_symbol)
+    st.plotly_chart(fig_rolling, use_container_width=True)
+
+# ── PDF report button ─────────────────────────────────────────────────────
+st.divider()
+if hist.empty:
+    st.disabled = True
+else:
+    if st.button("📄 Generate PDF Report", use_container_width=True):
+        # Use current figures where available; if any are None, they’ll be skipped
+        try:
+            pdf_bytes = generate_pdf_report(
+                symbol=selected_symbol,
+                range_choice=range_choice,
+                metrics=metrics,
+                fig_main=fig_main,
+                fig_returns=fig_returns if 'fig_returns' in locals() else None,
+                fig_rolling=fig_rolling if 'fig_rolling' in locals() else None,
+            )
+            st.download_button(
+                "⬇️ Download Report PDF",
+                data=pdf_bytes,
+                file_name=f"{selected_symbol}_{range_choice}_report.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error("Could not generate the PDF report.")
+            st.exception(e)
+
 st.divider()
 with st.expander("Notes & Tips"):
     st.markdown(
         "- **Adjusted prices** include splits/dividends.\n"
         "- If Yahoo search is flaky, type the ticker directly.\n"
-        "- Educational use only; data may be delayed."
+        "- PDF export uses `kaleido` (for Plotly images) and `reportlab`."
     )

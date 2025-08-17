@@ -5,3 +5,5 @@ plotly
 pandas
 numpy
 requests
+reportlab
+kaleido
