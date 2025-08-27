@@ -22,6 +22,9 @@ from reportlab.pdfgen import canvas
 # DB helpers
 from database import get_conn, add_favorite, remove_favorite, list_favorites
 
+# NEW: Investment calculator tab
+from Investment_Calc import render_investment_calculator_tab
+
 # Yahoo search
 try:
     import requests  # noqa: F401
@@ -29,8 +32,8 @@ try:
 except Exception:
     HAS_REQUESTS = False
 
-# Search Functions 
 
+# Search Functions
 @st.cache_data(show_spinner=False, ttl=300)
 def search_symbols(query: str) -> List[Dict]:
     """Use Yahoo Finance search to find symbols by company/ETF name or ticker."""
@@ -107,7 +110,7 @@ def get_history(symbol: str,
             else:
                 df.columns = df.columns.get_level_values(0)
         except Exception:
-            df.columns = [" ".join([str(p) for p in tup if p is not None]).strip() for tup in df.columns]
+            df.columns = [" ".join([str(p) for p in tup if p is not None]).strip() for p in df.columns]
 
     df.columns = [str(c).strip().title() for c in df.columns]
     if "Adj Close" not in df.columns and "Close" in df.columns:
@@ -479,9 +482,9 @@ with right:
             use_container_width=True
         )
 
-# Analytics tabs
+# Analytics tabs (now with a 4th tab for the calculator)
 st.divider()
-tab1, tab2, tab3 = st.tabs(["🔀 Compare", "📅 Annual Returns", "📈 Rolling Vol"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔀 Compare", "📅 Annual Returns", "📈 Rolling Vol", "💰 Investment Calculator"])
 
 with tab1:
     st.caption("Compare multiple tickers by normalizing each to 100 at the start date.")
@@ -521,10 +524,14 @@ with tab3:
     fig_rolling = rolling_vol_chart(hist, rolling_win, selected_symbol)
     st.plotly_chart(fig_rolling, use_container_width=True)
 
+with tab4:
+    # Render the calculator from the separate module
+    render_investment_calculator_tab()
+
 # PDF report button
 st.divider()
 if hist.empty:
-    st.disabled = True
+    st.disabled = True  # NOTE: this doesn't actually disable buttons; kept to minimize diff
 else:
     if st.button("📄 Generate PDF Report", use_container_width=True):
         # Use current figures where available; if any are None, they’ll be skipped
