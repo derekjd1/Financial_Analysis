@@ -393,8 +393,12 @@ with st.sidebar:
         choice = st.selectbox("Matches", labels, help=help_msg)
         selected_symbol = values_map[choice]["symbol"] if choice else query.strip()
     else:
-        st.caption("No matches (or offline search). Using your input as the ticker symbol.")
-        selected_symbol = query.strip()
+        if query.strip():
+            st.caption("No matches (or offline search). Using your input as the ticker symbol.")
+            selected_symbol = query.strip()
+        else:
+            selected_symbol = None
+
 
     st.divider()
     st.subheader("Range & View")
@@ -463,8 +467,12 @@ else:
     start, end, period = compute_date_range(range_choice)
 
 # Fetch & display
-with st.spinner(f"Loading {selected_symbol}…"):
-    hist = get_history(selected_symbol, start, end, period, interval, auto_adjust)
+if not selected_symbol:
+    st.warning("Please enter a ticker symbol to load data.")
+    hist = pd.DataFrame()
+else:
+    with st.spinner(f"Loading {selected_symbol}…"):
+        hist = get_history(selected_symbol, start, end, period, interval, auto_adjust)
 
 left, right = st.columns((7, 5))
 
