@@ -118,7 +118,7 @@ def get_history(symbol: str,
                 df.columns = df.columns.get_level_values(0)
         except Exception:
             # "tup not defined" - not an error
-            df.columns = [" ".join([str(p) for p in tup if p is not None]).strip() for p in df.columns]
+            df.columns = [" ".join([str(p) for p in tup if p is not None]).strip() for p in df.columns] # type: ignore
 
     df.columns = [str(c).strip().title() for c in df.columns]
     if "Adj Close" not in df.columns and "Close" in df.columns:
