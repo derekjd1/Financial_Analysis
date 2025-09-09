@@ -1,5 +1,4 @@
 # app.py — Streamlit Finance Analyzer (Favorites, Compare, Heatmap, Rolling Vol, PDF export, Investment Calculator)
-# Run: streamlit run app.py
 
 from __future__ import annotations
 
