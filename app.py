@@ -1,435 +1,140 @@
-# app.py — Streamlit Finance Analyzer (Favorites, Compare, Heatmap, Rolling Vol, PDF export, Investment Calculator)
+# app.py — Streamlit Finance Analyzer (TICKER-ONLY input, no company-name search, no .TO auto-append)
 
-from __future__ import annotations
-
-from io import BytesIO
-from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-
-import numpy as np
+import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
+from datetime import date, timedelta
+
 import yfinance as yf
 
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
-
-# DB helpers
 from database import get_conn, add_favorite, remove_favorite, list_favorites
-
-# Investment calculator tab
-from Investment_Calc import render_investment_calculator_tab
-
-# Yahoo search dependency (optional)
-try:
-    import requests  # noqa: F401
-    HAS_REQUESTS = True
-except Exception:
-    HAS_REQUESTS = False
+from data import compute_date_range, get_history, get_prices_for
+from analytics import compute_metrics, annual_returns, pct
+from charts import make_chart, make_compare_chart, make_returns_heatmap, rolling_vol_chart
+from reporting import generate_pdf_report
+from investment_calc import render_investment_calculator_tab
 
 
 # ----------------------------
-# Search Functions
-# ----------------------------
-@st.cache_data(show_spinner=False, ttl=300)
-def search_symbols(query: str) -> List[Dict]:
-    """Use Yahoo Finance search to find symbols by company/ETF name or ticker."""
-    if not HAS_REQUESTS or not query.strip():
-        return []
-    try:
-        url = "https://query2.finance.yahoo.com/v1/finance/search"
-        params = {"q": query.strip(), "quotesCount": 10, "newsCount": 0}
-        r = requests.get(url, params=params, timeout=6)
-        r.raise_for_status()
-        js = r.json()
-        quotes = js.get("quotes", []) or []
-        results = [
-            q for q in quotes
-            if q.get("symbol") and q.get("exchange") and q.get("quoteType") in {"EQUITY", "ETF"}
-        ]
-        return results[:10]
-    except Exception:
-        return []
-
-
-# ----------------------------
-# Date Ranges
-# ----------------------------
-def _ytd_range(today: date) -> Tuple[date, date]:
-    return date(today.year, 1, 1), today
-
-
-def _years_ago(today: date, years: int) -> Tuple[date, date]:
-    start = today - timedelta(days=int(round(365.25 * years)))
-    return start, today
-
-
-def compute_date_range(label: str, today: Optional[date] = None) -> Tuple[Optional[date], Optional[date], Optional[str]]:
-    """Return (start, end, period) for yfinance."""
-    if today is None:
-        today = date.today()
-    label = label.upper()
-    if label == "YTD":
-        s, e = _ytd_range(today)
-        return s, e, None
-    if label == "1Y":
-        s, e = _years_ago(today, 1)
-        return s, e, None
-    if label == "5Y":
-        s, e = _years_ago(today, 5)
-        return s, e, None
-    if label == "MAX":
-        return None, None, "max"
-    return None, None, None
-
-
-# ----------------------------
-# History & Analytics
-# ----------------------------
-@st.cache_data(show_spinner=True)
-def get_history(symbol: str,
-                start: Optional[date],
-                end: Optional[date],
-                period: Optional[str],
-                interval: str,
-                auto_adjust: bool) -> pd.DataFrame:
-    """Download price history for a symbol with yfinance; normalize columns."""
-    dl_kwargs = dict(interval=interval, auto_adjust=auto_adjust, progress=False, group_by="column")
-    if period:
-        df = yf.download(symbol, period=period, **dl_kwargs)
-    else:
-        sdt = pd.to_datetime(start) if start else None
-        edt = pd.to_datetime(end) if end else None
-        df = yf.download(symbol, start=sdt, end=edt, **dl_kwargs)
-
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    # Handle MultiIndex vs single-level columns
-    if isinstance(df.columns, pd.MultiIndex):
-        try:
-            if symbol in df.columns.get_level_values(-1):
-                df = df.xs(symbol, axis=1, level=-1)
-            else:
-                df.columns = df.columns.get_level_values(0)
-        except Exception:
-            # "tup not defined" - not an error
-            df.columns = [" ".join([str(p) for p in tup if p is not None]).strip() for p in df.columns] # type: ignore
-
-    df.columns = [str(c).strip().title() for c in df.columns]
-    if "Adj Close" not in df.columns and "Close" in df.columns:
-        df["Adj Close"] = df["Close"]
-
-    # Basic index hygiene
-    try:
-        df = df[~df.index.duplicated(keep="last")]
-        if getattr(df.index, "tz", None) is not None:
-            df.index = df.index.tz_localize(None)
-        df = df.sort_index()
-    except Exception:
-        pass
-
-    return df
-
-
-def pct(x: Optional[float]) -> str:
-    return f"{x*100:.2f}%" if x is not None else "—"
-
-
-def compute_metrics(df: pd.DataFrame):
-    if df is None or df.empty:
-        return {"return_pct": None, "cagr": None, "volatility": None, "max_drawdown": None}
-    prices = df["Adj Close"].dropna()
-    if len(prices) < 2:
-        return {"return_pct": None, "cagr": None, "volatility": None, "max_drawdown": None}
-
-    total_return = (prices.iloc[-1] / prices.iloc[0]) - 1.0
-    n_days = (prices.index[-1] - prices.index[0]).days
-    yrs = max(n_days / 365.25, 1e-9)
-    cagr = (prices.iloc[-1] / prices.iloc[0]) ** (1 / yrs) - 1.0 if yrs > 0 else None
-
-    daily_ret = prices.pct_change().dropna()
-    vol = float(daily_ret.std() * np.sqrt(252)) if not daily_ret.empty else None
-
-    cummax = prices.cummax()
-    dd = (prices / cummax) - 1.0
-    max_dd = float(dd.min()) if not dd.empty else None
-
-    return {
-        "return_pct": float(total_return),
-        "cagr": float(cagr) if cagr is not None else None,
-        "volatility": vol,
-        "max_drawdown": max_dd,
-    }
-
-
-def make_chart(df: pd.DataFrame, title: str, chart_type: str, show_sma: bool) -> go.Figure:
-    """Build the main price chart (no log scale)."""
-    fig = go.Figure()
-    if df.empty:
-        fig.update_layout(title="No data")
-        return fig
-
-    if chart_type == "Candlestick (OHLC)" and all(c in df.columns for c in ["Open", "High", "Low", "Close"]):
-        fig.add_trace(go.Candlestick(
-            x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name="OHLC"
-        ))
-    else:
-        fig.add_trace(go.Scatter(x=df.index, y=df["Adj Close"], mode="lines", name="Adj Close"))
-
-    if show_sma:
-        for win in (50, 200):
-            if df.shape[0] >= win:
-                sma = df["Adj Close"].rolling(win).mean()
-                fig.add_trace(go.Scatter(x=df.index, y=sma, mode="lines", name=f"SMA {win}"))
-
-    fig.update_layout(
-        title=title, xaxis_title="Date", yaxis_title="Price",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=30, t=60, b=40),
-    )
-    return fig
-
-
-def get_prices_for(symbols, start, end, period, interval, auto_adjust):
-    """Fetch Adj Close for many symbols and align into one DataFrame."""
-    frames = {}
-    for s in symbols:
-        df = get_history(s, start, end, period, interval, auto_adjust)
-        if not df.empty and "Adj Close" in df:
-            frames[s.upper()] = df["Adj Close"].rename(s.upper())
-    if not frames:
-        return pd.DataFrame()
-    prices = pd.concat(frames.values(), axis=1).dropna(how="all")
-    return prices
-
-
-def make_compare_chart(prices: pd.DataFrame, title: str) -> go.Figure:
-    """Normalize series to 100 at the first common date and plot."""
-    fig = go.Figure()
-    if prices.empty:
-        fig.update_layout(title="No data for comparison")
-        return fig
-    prices = prices.dropna()
-    base = prices.iloc[0]
-    norm = (prices / base) * 100.0
-    for col in norm.columns:
-        fig.add_trace(go.Scatter(x=norm.index, y=norm[col], mode="lines", name=col))
-    fig.update_layout(
-        title=title + " (Indexed to 100)",
-        xaxis_title="Date",
-        yaxis_title="Index (Start = 100)",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=30, t=60, b=40),
-    )
-    return fig
-
-
-def annual_returns(df: pd.DataFrame) -> pd.Series:
-    """Compute annual total returns from Adj Close for one symbol history."""
-    if df.empty or "Adj Close" not in df:
-        return pd.Series(dtype="float64")
-    yearly_last = df["Adj Close"].resample("Y").last()
-    returns = yearly_last.pct_change().dropna()
-    returns.index = returns.index.year
-    return returns
-
-
-def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
-    """Single-row heatmap of annual returns."""
-    if returns.empty:
-        fig = go.Figure()
-        fig.update_layout(title="No annual returns to display")
-        return fig
-    years = list(returns.index.astype(str))
-    z = [list(returns.values * 100.0)]  # percent
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=z, x=years, y=[symbol.upper()],
-            colorscale="RdYlGn", zmid=0, colorbar=dict(title="Return %")
-        )
-    )
-    fig.update_layout(
-        title=f"{symbol.upper()} — Annual Returns",
-        xaxis_title="Year", yaxis_title="",
-        margin=dict(l=40, r=30, t=60, b=40),
-    )
-    return fig
-
-
-def rolling_vol_chart(df: pd.DataFrame, window: int, symbol: str) -> go.Figure:
-    """Annualized rolling volatility from daily returns."""
-    fig = go.Figure()
-    if df.empty or "Adj Close" not in df:
-        fig.update_layout(title="No data for rolling stats")
-        return fig
-    daily = df["Adj Close"].pct_change().dropna()
-    roll_vol = daily.rolling(window).std() * np.sqrt(252)
-    fig.add_trace(go.Scatter(x=roll_vol.index, y=roll_vol, mode="lines", name=f"Rolling vol ({window}d)"))
-    fig.update_layout(
-        title=f"{symbol.upper()} — Rolling Volatility ({window} day)",
-        xaxis_title="Date", yaxis_title="Annualized Volatility",
-        hovermode="x unified",
-        margin=dict(l=40, r=30, t=60, b=40),
-    )
-    return fig
-
-
-# ----------------------------
-# PDF Report
-# ----------------------------
-def _fig_to_imgreader(fig: go.Figure) -> Optional[ImageReader]:
-    """Convert Plotly figure to an ImageReader using kaleido."""
-    try:
-        png = fig.to_image(format="png", scale=2)  # requires 'kaleido'
-        return ImageReader(BytesIO(png))
-    except Exception as e:
-        st.error("Failed to render chart image. Ensure `kaleido` is installed.")
-        st.exception(e)
-        return None
-
-
-def generate_pdf_report(symbol: str,
-                        range_choice: str,
-                        metrics: Dict[str, Optional[float]],
-                        fig_main: go.Figure,
-                        fig_returns: Optional[go.Figure],
-                        fig_rolling: Optional[go.Figure]) -> bytes:
-        """Build a multi-page PDF and return bytes."""
-        buf = BytesIO()
-        c = canvas.Canvas(buf, pagesize=letter)
-        W, H = letter
-        M = 0.6 * inch
-
-        # Header
-        y = H - M
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(M, y, f"Finance Report: {symbol.upper()}")
-        c.setFont("Helvetica", 10)
-        c.drawString(M, y - 14, f"Range: {range_choice}")
-        c.drawString(M, y - 28, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        y -= 44
-
-        # Metrics block
-        lines = [
-            f"Last Price: see chart tooltip for most recent close",
-            f"Total Return: {pct(metrics.get('return_pct'))}",
-            f"CAGR: {pct(metrics.get('cagr'))}",
-            f"Volatility (ann.): {pct(metrics.get('volatility'))}",
-            f"Max Drawdown: {pct(metrics.get('max_drawdown'))}",
-        ]
-        c.setFont("Helvetica", 11)
-        for ln in lines:
-            c.drawString(M, y, ln)
-            y -= 14
-        y -= 6
-
-        # Helper to place a figure
-        def place_fig(figure: go.Figure, title: str, y_pos: float) -> float:
-            imgR = _fig_to_imgreader(figure)
-            if imgR is None:
-                return y_pos
-            iw, ih = imgR.getSize()
-            max_w = W - 2 * M
-            tgt_h = (max_w * ih) / iw
-            if tgt_h > (y_pos - M - 32):
-                # new page if it won't fit
-                c.showPage()
-                c.setFont("Helvetica-Bold", 12)
-                c.drawString(M, H - M, title)
-                y_loc = H - M - 18
-            else:
-                c.setFont("Helvetica-Bold", 12)
-                c.drawString(M, y_pos - 14, title)
-                y_loc = y_pos - 18
-            c.drawImage(imgR, M, y_loc - tgt_h, width=max_w, height=tgt_h, preserveAspectRatio=True, mask='auto')
-            return y_loc - tgt_h - 16
-
-        # Add charts
-        y = place_fig(fig_main, "Price Chart", y)
-        if fig_returns is not None:
-            y = place_fig(fig_returns, "Annual Returns", y)
-        if fig_rolling is not None:
-            y = place_fig(fig_rolling, "Rolling Volatility", y)
-
-        c.showPage()
-        c.save()
-        buf.seek(0)
-        return buf.getvalue()
-
-
-# ----------------------------
-# UI
+# Page config
 # ----------------------------
 st.set_page_config(page_title="Finance Analyzer", page_icon="📈", layout="wide")
 st.title("📈 Finance Analyzer — Stocks & ETFs")
 
-conn = get_conn()  # SQLite connection (cached)
+conn = get_conn()
 
+
+def safe_rerun() -> None:
+    try:
+        st.rerun()
+    except Exception:
+        try:
+            st.experimental_rerun()
+        except Exception:
+            pass
+
+
+# ----------------------------
+# Session defaults
+# ----------------------------
+if "selected_symbol" not in st.session_state:
+    st.session_state.selected_symbol = "VFV.TO"
+if "selected_name" not in st.session_state:
+    st.session_state.selected_name = ""
+if "query_input" not in st.session_state:
+    st.session_state.query_input = st.session_state.selected_symbol
+
+
+@st.cache_data(show_spinner=False, ttl=24 * 3600)
+def get_company_name_from_yf(symbol: str) -> str:
+    """Cached yfinance name lookup (for chart title only)."""
+    try:
+        t = yf.Ticker(symbol)
+        info = getattr(t, "info", {}) or {}
+        return (
+            info.get("shortName")
+            or info.get("longName")
+            or info.get("displayName")
+            or info.get("name")
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+
+
+def is_valid_ticker(user_input: str) -> bool:
+    """
+    Simple validation:
+    - ticker only (no spaces)
+    - allow letters/numbers and: . - ^
+    """
+    s = (user_input or "").strip()
+    if not s:
+        return False
+    if any(ch.isspace() for ch in s):
+        return False
+    allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-^")
+    s_up = s.upper()
+    return all(ch in allowed for ch in s_up)
+
+
+# ----------------------------
+# Sidebar
+# ----------------------------
 with st.sidebar:
-    st.subheader("Search")
-    query = st.text_input("Enter a ticker or name (e.g., 'AAPL' or 'Apple')", value="VFV.TO")
+    st.subheader("Search (Ticker only)")
 
-    results = search_symbols(query) if query else []
-    help_msg = "Select a match below or type a known symbol directly above."
+    st.info("Enter a **ticker symbol**, not a company name.")
+    st.info("🇨🇦 For Canadian stocks/ETFs, include **.TO** (e.g., `BNS.TO`, `XEQT.TO`).")
 
-    values_map: Dict[str, Dict] = {}
-    if results:
-        labels = []
-        for q in results:
-            sym = q.get("symbol", "")
-            nm = q.get("shortname") or q.get("longname") or ""
-            exch = q.get("exchangeDisplay") or q.get("exchange") or ""
-            typ = q.get("typeDisp") or q.get("quoteType") or ""
-            label = f"{sym} — {nm} ({exch} · {typ})" if nm else f"{sym} ({exch} · {typ})"
-            labels.append(label)
-            values_map[label] = q
-        choice = st.selectbox("Matches", labels, help=help_msg)
-        selected_symbol = values_map[choice]["symbol"] if choice else query.strip()
-    else:
-        if query.strip():
-            st.caption("No matches (or offline search). Using your input as the ticker symbol.")
-            selected_symbol = query.strip()
+    with st.form("ticker_form", clear_on_submit=False):
+        query = st.text_input(
+            "Ticker",
+            value=st.session_state.query_input,
+            placeholder="Examples: AAPL, MSFT, BNS.TO, XEQT.TO",
+        )
+        st.divider()
+        st.subheader("Range & View")
+        range_choice = st.radio("Date range", ["YTD", "1Y", "5Y", "MAX", "Custom"], horizontal=True)
+
+        custom_start = custom_end = None
+        if range_choice == "Custom":
+            c1, c2 = st.columns(2)
+            with c1:
+                custom_start = st.date_input("Start", value=date.today() - timedelta(days=365))
+            with c2:
+                custom_end = st.date_input("End", value=date.today())
+            if custom_start > custom_end:
+                st.error("Start date must be before end date.")
+
+        chart_type = st.selectbox("Chart type", ["Line (Adj Close)", "Candlestick (OHLC)"])
+        show_sma = st.checkbox("Show 50/200 SMA", value=True)
+        auto_adjust = st.checkbox("Use adjusted prices (recommended)", value=True)
+        interval = "1d"
+
+        load_clicked = st.form_submit_button("🔎 Load")
+
+    if load_clicked:
+        raw = (query or "").strip()
+        if not is_valid_ticker(raw):
+            st.error("Please enter a valid ticker symbol (no spaces). Example: `AAPL` or `BNS.TO`.")
         else:
-            selected_symbol = None
+            st.session_state.query_input = raw
+            st.session_state.selected_symbol = raw.upper()
+            st.session_state.selected_name = ""  # will be filled after data loads
+            safe_rerun()
 
+    selected_symbol = st.session_state.selected_symbol
 
-    st.divider()
-    st.subheader("Range & View")
-    range_choice = st.radio("Date range", ["YTD", "1Y", "5Y", "MAX", "Custom"], horizontal=True)
-
-    custom_start = custom_end = None
-    if range_choice == "Custom":
-        c1, c2 = st.columns(2)
-        with c1:
-            custom_start = st.date_input("Start", value=date.today() - timedelta(days=365))
-        with c2:
-            custom_end = st.date_input("End", value=date.today())
-        if custom_start > custom_end:
-            st.error("Start date must be before end date.")
-
-    chart_type = st.selectbox("Chart type", ["Line (Adj Close)", "Candlestick (OHLC)"])
-    show_sma = st.checkbox("Show 50/200 SMA", value=True)
-    auto_adjust = st.checkbox("Use adjusted prices (recommended)", value=True)
-    interval = "1d"
-
-    # Favorites
     st.divider()
     st.subheader("⭐ Favorites")
     fav_label = st.text_input("Label (optional)", key="fav_label", placeholder="e.g., Core S&P 500")
+
     if st.button("Add current symbol to favorites", use_container_width=True):
         if selected_symbol:
             add_favorite(conn, selected_symbol, fav_label)
             st.success(f"Added {selected_symbol.upper()} to favorites.")
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            safe_rerun()
 
     favs = list_favorites(conn)
     if favs.empty:
@@ -438,8 +143,9 @@ with st.sidebar:
         display = [f"{row.symbol}" + (f" — {row.label}" if row.label else "") for _, row in favs.iterrows()]
         pick = st.selectbox("Go to favorite", ["—"] + display, index=0)
         if pick != "—":
-            selected_symbol = pick.split(" —")[0].strip()
-            st.info(f"Loaded favorite: {selected_symbol}")
+            st.session_state.selected_symbol = pick.split(" —")[0].strip().upper()
+            st.session_state.selected_name = ""
+            safe_rerun()
 
         st.markdown("**Manage favorites**")
         for _, row in favs.iterrows():
@@ -449,23 +155,25 @@ with st.sidebar:
             with c2:
                 if st.button("🗑️", key=f"del_{row.id}", help=f"Remove {row.symbol}"):
                     remove_favorite(conn, row.symbol)
-                    try:
-                        st.rerun()
-                    except Exception:
-                        st.experimental_rerun()
+                    safe_rerun()
+
 
 st.markdown(
-    "Use the sidebar to search by name or ticker, choose a date range, and switch chart types. "
-    "Data via `yfinance`. Favorites are saved locally."
+    "Enter a **ticker symbol** in the sidebar and click **Load**. "
+    "For Canadian tickers, include **.TO** (example: `BNS.TO`, `XEQT.TO`)."
 )
 
-# Resolve range
+# ----------------------------
+# Resolve date range
+# ----------------------------
 if range_choice == "Custom":
     start, end, period = custom_start, custom_end, None
 else:
     start, end, period = compute_date_range(range_choice)
 
-# Fetch & display
+# ----------------------------
+# Fetch history
+# ----------------------------
 if not selected_symbol:
     st.warning("Please enter a ticker symbol to load data.")
     hist = pd.DataFrame()
@@ -473,26 +181,41 @@ else:
     with st.spinner(f"Loading {selected_symbol}…"):
         hist = get_history(selected_symbol, start, end, period, interval, auto_adjust)
 
+# Name for chart title (optional polish)
+if selected_symbol and not st.session_state.selected_name:
+    st.session_state.selected_name = get_company_name_from_yf(selected_symbol)
+selected_name = st.session_state.selected_name
+
 left, right = st.columns((7, 5))
 
 with left:
     if hist.empty:
-        st.warning("No price data returned. Double-check the symbol and range.")
+        st.warning("No price data returned. Double-check the ticker (and include .TO for Canadian symbols).")
         fig_main = go.Figure()
     else:
-        fig_main = make_chart(hist, f"{selected_symbol} — {range_choice}", chart_type, show_sma)
+        title_left = selected_symbol.upper()
+        if selected_name:
+            title_left = f"{title_left} — {selected_name}"
+        fig_main = make_chart(hist, f"{title_left} ({range_choice})", chart_type, show_sma)
         st.plotly_chart(fig_main, use_container_width=True)
 
 with right:
     st.subheader("Quick Stats")
     fig_returns = None
     fig_rolling = None
+
     if hist.empty:
         st.info("Stats will appear here once data loads.")
         metrics = {"return_pct": None, "cagr": None, "volatility": None, "max_drawdown": None}
     else:
         metrics = compute_metrics(hist)
-        last_price = float(hist["Adj Close"].iloc[-1]) if "Adj Close" in hist else float(hist["Close"].iloc[-1])
+
+        if "Adj Close" in hist:
+            last_price = float(hist["Adj Close"].iloc[-1])
+        elif "Close" in hist:
+            last_price = float(hist["Close"].iloc[-1])
+        else:
+            last_price = float("nan")
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Last Price", f"{last_price:,.2f}")
@@ -500,12 +223,14 @@ with right:
         c3.metric("CAGR", pct(metrics["cagr"]))
 
         c4, c5 = st.columns(2)
+        wk_low = wk_high = None
         try:
             last_252 = hist.tail(252)
             wk_low = float(last_252["Adj Close"].min())
             wk_high = float(last_252["Adj Close"].max())
         except Exception:
-            wk_low = wk_high = None
+            pass
+
         c4.metric("52-Week Low", f"{wk_low:,.2f}" if wk_low is not None else "—")
         c5.metric("52-Week High", f"{wk_high:,.2f}" if wk_high is not None else "—")
 
@@ -524,7 +249,7 @@ with right:
         )
 
 # ----------------------------
-# Analytics & Tools Tabs
+# Tabs
 # ----------------------------
 st.divider()
 st.subheader("📊 Analytics & Tools")
@@ -537,26 +262,32 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
     st.caption("Compare multiple tickers by normalizing each to 100 at the start date.")
-    fav_options = favs.symbol.tolist() if 'favs' in globals() and not favs.empty else []
+    fav_options = favs.symbol.tolist() if (favs is not None and not favs.empty) else []
     compare_favs = st.multiselect("Pick favorites to compare", options=fav_options, default=[])
-    manual = st.text_input("Or enter tickers (comma-separated)", placeholder="e.g., VOO, VTI, QQQ")
+    manual = st.text_input("Or enter tickers (comma-separated)", placeholder="e.g., VFV.TO, XEQT.TO, AAPL")
 
     manual_syms = [s.strip().upper() for s in manual.split(",") if s.strip()] if manual else []
     base_sym = [selected_symbol.upper()] if selected_symbol else []
     symbols = base_sym + [s.upper() for s in compare_favs] + manual_syms
-    seen = set()
-    symbols = [s for s in symbols if not (s in seen or seen.add(s))]
 
-    if len(symbols) <= 1:
+    # de-dupe, keep order
+    seen = set()
+    ordered = []
+    for s in symbols:
+        if s and s not in seen:
+            seen.add(s)
+            ordered.append(s)
+
+    if len(ordered) <= 1:
         st.info("Add at least one more symbol to compare.")
     else:
-        with st.spinner(f"Comparing: {', '.join(symbols)}"):
-            prices = get_prices_for(symbols, start, end, period, interval, auto_adjust)
+        with st.spinner(f"Comparing: {', '.join(ordered)}"):
+            prices = get_prices_for(ordered, start, end, period, interval, auto_adjust)
         st.plotly_chart(make_compare_chart(prices, "Relative Performance"), use_container_width=True)
 
 with tab2:
     st.caption("Year-by-year total returns calculated from adjusted close.")
-    rets = annual_returns(hist)
+    rets = annual_returns(hist) if not hist.empty else pd.Series(dtype="float64")
     if rets.empty:
         st.info("Not enough data to compute annual returns for this selection.")
     else:
@@ -568,14 +299,14 @@ with tab2:
 with tab3:
     st.caption("Rolling annualized volatility from daily returns.")
     rolling_win = st.slider("Window (days)", min_value=20, max_value=250, value=60, step=5, key="rolling_win")
-    fig_rolling = rolling_vol_chart(hist, rolling_win, selected_symbol)
+    fig_rolling = rolling_vol_chart(hist, rolling_win, selected_symbol if selected_symbol else "")
     st.plotly_chart(fig_rolling, use_container_width=True)
 
 with tab4:
     render_investment_calculator_tab()
 
 # ----------------------------
-# PDF report
+# PDF
 # ----------------------------
 st.divider()
 if hist.empty:
@@ -590,6 +321,7 @@ else:
                 fig_main=fig_main,
                 fig_returns=fig_returns,
                 fig_rolling=fig_rolling,
+                pct_fmt=pct,
             )
             st.download_button(
                 "⬇️ Download Report PDF",
@@ -605,7 +337,7 @@ else:
 st.divider()
 with st.expander("Notes & Tips"):
     st.markdown(
-        "- **Adjusted prices** include splits/dividends.\n"
-        "- If Yahoo search is flaky, type the ticker directly.\n"
-        "- PDF export uses `kaleido` (for Plotly images) and `reportlab`."
+        "- Input must be a **ticker symbol** (no company names).\n"
+        "- For Canadian symbols, include **.TO**.\n"
+        "- If you get no data, the ticker is likely wrong or missing the exchange suffix."
     )
