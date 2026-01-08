@@ -95,7 +95,7 @@ with st.sidebar:
         )
         st.divider()
         st.subheader("Range & View")
-        range_choice = st.radio("Date range", ["YTD", "1Y", "5Y", "MAX", "Custom"], horizontal=True)
+        range_choice = st.radio("Date range", ["MAX", "YTD", "1Y", "5Y", "Custom"], horizontal=True)
 
         custom_start = custom_end = None
         if range_choice == "Custom":
@@ -121,7 +121,7 @@ with st.sidebar:
         else:
             st.session_state.query_input = raw
             st.session_state.selected_symbol = raw.upper()
-            st.session_state.selected_name = ""  # will be filled after data loads
+            st.session_state.selected_name = ""
             safe_rerun()
 
     selected_symbol = st.session_state.selected_symbol
