@@ -108,7 +108,7 @@ with st.sidebar:
                 st.error("Start date must be before end date.")
 
         chart_type = st.selectbox("Chart type", ["Line (Adj Close)", "Candlestick (OHLC)"])
-        show_sma = st.checkbox("Show 50/200 SMA", value=True)
+        show_sma = st.checkbox("Show 50/200 SMA", value=False)
         auto_adjust = st.checkbox("Use adjusted prices (recommended)", value=True)
         interval = "1d"
 
