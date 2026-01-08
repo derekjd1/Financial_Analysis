@@ -38,11 +38,11 @@ def safe_rerun() -> None:
 # Session defaults
 # ----------------------------
 if "selected_symbol" not in st.session_state:
-    st.session_state.selected_symbol = "VFV.TO"
+    st.session_state.selected_symbol = ""
 if "selected_name" not in st.session_state:
     st.session_state.selected_name = ""
 if "query_input" not in st.session_state:
-    st.session_state.query_input = st.session_state.selected_symbol
+    st.session_state.query_input = ""
 
 
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
