@@ -1,28 +1,32 @@
 # 📈 Financial Analysis (Streamlit)
 
 A lightweight Streamlit app for exploring stocks & ETFs.  
-Search by name or ticker (Yahoo Finance), pick a date range (YTD, 1Y, 5Y, MAX, Custom), view interactive Plotly charts, and save favorites in a local SQLite database.
+Search by ticker symbol (Yahoo Finance), pick a date range (YTD, 1Y, 5Y, MAX, Custom), view interactive Plotly charts, and save favorites in a local SQLite database.
 
 ---
 
 ## Features
 
-- **Smart search:** type a company/ETF name or ticker (Yahoo Finance autocomplete).
+- **Ticker-only search:** enter a ticker symbol (e.g., `AAPL`, `MSFT`, `BNS TO`, `XEQT.TO`).
 - **Flexible ranges:** YTD, 1Y, 5Y, MAX, or custom start/end dates.
-- **Views:** Line (Adj Close) or Candlestick (OHLC), optional 50/200-day SMAs, optional log scale.
-- **Quick stats:** last price, total return, CAGR, annualized volatility, max drawdown, 52-week high/low.
-- **Compare multiple tickers:** normalize each series to 100 and overlay performance.
-- **Annual returns heatmap:** year-by-year returns + compact table.
-- **Rolling volatility:** adjustable window (e.g., 60d) with annualized vol.
-- **Favorites (SQLite):** add, label, load, and remove favorites. Persists between runs.
-- **Investment Calculator:** starting amount, expected yearly return, annual contributions, years, contribution timing (End/Beginning).  
-  Outputs end balance, totals, **growth line chart**, and **composition pie**.
-- **PDF export:** main chart + (when available) heatmap & rolling vol.
-- **CSV export:** download the displayed price history.  
+- **Views:** Line (Adj Close) or Candlestick (OHLC), optional 50/200-day SMAs.
+- **Quick stats:** last price, total return, CAGR, annualized volatility, max drawdown, 52-week high low.
+- **Compare tickers:** normalize each series to 100 and overlay relative performance.
+- **Annual returns heatmap:** year-by-year total returns + compact table.
+- **Rolling volatility:** adjustable window (e.g., 60d) with annualized volatility.
+- **Favorites (SQLite):** add, label, load, and remove favorites.
+- **Investment calculator:** project growth with contributions and expected return + charts.
+- **PDF export:** generate a multi-page report with charts (requires `kaleido`).
+- **CSV export:** download the displayed price history.
 
 
 > Data via [`yfinance`](https://github.com/ranaroussi/yfinance).
 
+## Favorites & Persistence
+
+Favorites are stored in a local SQLite database (`favorites.db`).
+
+- **Local runs:** favorites persist between sessions on your machine.
 ---
 
 ## Quick Start
