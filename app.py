@@ -91,7 +91,7 @@ with st.sidebar:
         query = st.text_input(
             "Ticker",
             value=st.session_state.query_input,
-            placeholder="Examples: AAPL, MSFT, BNS.TO, XEQT.TO",
+            placeholder="Examples: AAPL, XEQT.TO",
         )
         st.divider()
         st.subheader("Range & View")
