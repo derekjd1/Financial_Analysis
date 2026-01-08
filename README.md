@@ -1,4 +1,4 @@
-# 📈 Financial Analysis (Streamlit)
+# 📈 Financial Analysis (Streamlit) - App URL: financialanalysisapplink.streamlit.app
 
 A lightweight Streamlit app for exploring stocks & ETFs.  
 Search by ticker symbol (Yahoo Finance), pick a date range (YTD, 1Y, 5Y, MAX, Custom), view interactive Plotly charts, and save favorites in a local SQLite database.
