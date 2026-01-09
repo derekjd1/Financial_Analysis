@@ -1,14 +1,11 @@
-# data.py — fetching price data via yfinance (ticker-only)
-
 from __future__ import annotations
-
 from datetime import date
 from typing import List, Optional, Tuple
-
 import pandas as pd
 import streamlit as st
 import yfinance as yf
 
+# data.py — fetching price data via yfinance (ticker-only)
 
 def compute_date_range(label: str, today: Optional[date] = None) -> Tuple[Optional[date], Optional[date], Optional[str]]:
     """Return (start, end, period) for yfinance."""
@@ -36,7 +33,6 @@ def get_history(
     interval: str,
     auto_adjust: bool,
 ) -> pd.DataFrame:
-    """Download price history for a symbol with yfinance; normalize columns."""
     symbol = (symbol or "").strip().upper()
     if not symbol:
         return pd.DataFrame()
@@ -47,14 +43,12 @@ def get_history(
         df = yf.download(symbol, period=period, **dl_kwargs)
     else:
         sdt = pd.to_datetime(start) if start else None
-        # yfinance treats end as EXCLUSIVE → add 1 day so UI end date is included
         edt = (pd.to_datetime(end) + pd.Timedelta(days=1)) if end else None
         df = yf.download(symbol, start=sdt, end=edt, **dl_kwargs)
 
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # Handle MultiIndex vs single-level columns
     if isinstance(df.columns, pd.MultiIndex):
         try:
             if symbol in df.columns.get_level_values(-1):
@@ -71,7 +65,6 @@ def get_history(
     if "Adj Close" not in df.columns and "Close" in df.columns:
         df["Adj Close"] = df["Close"]
 
-    # Basic index hygiene
     try:
         df = df[~df.index.duplicated(keep="last")]
         if getattr(df.index, "tz", None) is not None:
@@ -91,7 +84,6 @@ def get_prices_for(
     interval: str,
     auto_adjust: bool,
 ) -> pd.DataFrame:
-    """Fetch Adj Close for many symbols and align into one DataFrame."""
     frames = {}
     for s in symbols:
         sym = (s or "").strip().upper()

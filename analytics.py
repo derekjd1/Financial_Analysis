@@ -1,15 +1,20 @@
-# analytics.py — calculations/metrics
-
 from __future__ import annotations
-
 from typing import Dict, Optional
-
 import numpy as np
 import pandas as pd
 
+# analytics.py — calculations/metrics
 
 def pct(x: Optional[float]) -> str:
     return f"{x*100:.2f}%" if x is not None else "—"
+
+
+def _normalize_time_index(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index, errors="coerce")
+    df = df.sort_index()
+    return df[~df.index.isna()]
 
 
 def compute_metrics(df: pd.DataFrame) -> Dict[str, Optional[float]]:
@@ -45,7 +50,6 @@ def annual_returns(df: pd.DataFrame) -> pd.Series:
     if df.empty or "Adj Close" not in df:
         return pd.Series(dtype="float64")
 
-    # 'Y' is deprecated; use year-end 'YE'
     yearly_last = df["Adj Close"].resample("YE").last()
     returns = yearly_last.pct_change().dropna()
     returns.index = returns.index.year

@@ -12,6 +12,7 @@ venv/
 
 # macOS
 .DS_Store
+._*
 
 # Streamlit
 .streamlit/secrets.toml
@@ -31,3 +32,8 @@ favorites.db
 # Caches & logs
 .cache/
 *.log
+
+# Tests/coverage
+.pytest_cache/
+.coverage
+htmlcov/

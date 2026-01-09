@@ -1,14 +1,10 @@
-# reporting.py — PDF generation for the app
-
 from __future__ import annotations
 
 from datetime import datetime
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 
-import streamlit as st
 import plotly.graph_objects as go
-
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
@@ -20,9 +16,7 @@ def _fig_to_imgreader(fig: go.Figure) -> Optional[ImageReader]:
     try:
         png = fig.to_image(format="png", scale=2)  # requires 'kaleido'
         return ImageReader(BytesIO(png))
-    except Exception as e:
-        st.error("Failed to render chart image. Ensure `kaleido` is installed.")
-        st.exception(e)
+    except Exception:
         return None
 
 
@@ -33,22 +27,32 @@ def generate_pdf_report(
     fig_main: go.Figure,
     fig_returns: Optional[go.Figure],
     fig_rolling: Optional[go.Figure],
-    pct_fmt,
+    pct_fmt: Callable[[Optional[float]], str],
 ) -> bytes:
     """Build a multi-page PDF and return bytes."""
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
+    c.setTitle(f"Finance Report: {symbol.upper()}")
+
     W, H = letter
     M = 0.6 * inch
+    page_num = 1
 
-    y = H - M
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(M, y, f"Finance Report: {symbol.upper()}")
-    c.setFont("Helvetica", 10)
-    c.drawString(M, y - 14, f"Range: {range_choice}")
-    c.drawString(M, y - 28, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    y -= 44
+    def header():
+        nonlocal page_num
+        y0 = H - M
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(M, y0, f"Finance Report: {symbol.upper()}")
+        c.setFont("Helvetica", 10)
+        c.drawString(M, y0 - 14, f"Range: {range_choice}")
+        c.drawString(M, y0 - 28, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        c.setFont("Helvetica", 9)
+        c.drawRightString(W - M, M / 2, f"Page {page_num}")
+        return y0 - 44
 
+    y = header()
+
+    # Summary metrics
     lines = [
         "Last Price: see chart tooltip for most recent close",
         f"Total Return: {pct_fmt(metrics.get('return_pct'))}",
@@ -60,22 +64,35 @@ def generate_pdf_report(
     for ln in lines:
         c.drawString(M, y, ln)
         y -= 14
-    y -= 6
+    y -= 8
+
+    def new_page(title: str) -> float:
+        nonlocal page_num
+        c.showPage()
+        page_num += 1
+        y0 = header()
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(M, y0, title)
+        return y0 - 18
 
     def place_fig(figure: go.Figure, title: str, y_pos: float) -> float:
         imgR = _fig_to_imgreader(figure)
         if imgR is None:
+            # If image export fails, skip gracefully
             return y_pos
 
         iw, ih = imgR.getSize()
         max_w = W - 2 * M
         tgt_h = (max_w * ih) / iw
 
-        if tgt_h > (y_pos - M - 32):
-            c.showPage()
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(M, H - M, title)
-            y_loc = H - M - 18
+        # Clamp overly tall images to page height
+        max_h = H - 2 * M - 60
+        if tgt_h > max_h:
+            tgt_h = max_h
+
+        needed = tgt_h + 28  # title + padding
+        if y_pos - needed < M:
+            y_loc = new_page(title)
         else:
             c.setFont("Helvetica-Bold", 12)
             c.drawString(M, y_pos - 14, title)
@@ -90,7 +107,6 @@ def generate_pdf_report(
     if fig_rolling is not None:
         y = place_fig(fig_rolling, "Rolling Volatility", y)
 
-    c.showPage()
     c.save()
     buf.seek(0)
     return buf.getvalue()

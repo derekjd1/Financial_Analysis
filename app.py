@@ -1,5 +1,3 @@
-# app.py — Streamlit Finance Analyzer (TICKER-ONLY input, no company-name search, no .TO auto-append)
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,15 +12,12 @@ from charts import make_chart, make_compare_chart, make_returns_heatmap, rolling
 from reporting import generate_pdf_report
 from investment_calc import render_investment_calculator_tab
 
+# app.py — Streamlit Finance Analyzer
 
-# ----------------------------
-# Page config
-# ----------------------------
 st.set_page_config(page_title="Finance Analyzer", page_icon="📈", layout="wide")
 st.title("📈 Finance Analyzer — Stocks & ETFs")
 
 conn = get_conn()
-
 
 def safe_rerun() -> None:
     try:
@@ -34,9 +29,6 @@ def safe_rerun() -> None:
             pass
 
 
-# ----------------------------
-# Session defaults
-# ----------------------------
 if "selected_symbol" not in st.session_state:
     st.session_state.selected_symbol = ""
 if "selected_name" not in st.session_state:
@@ -95,7 +87,7 @@ with st.sidebar:
         )
         st.divider()
         st.subheader("Range & View")
-        range_choice = st.radio("Date range", ["MAX", "YTD", "1Y", "5Y", "Custom"], horizontal=True)
+        range_choice = st.radio("Date range", ["YTD", "1Y", "5Y", "MAX", "Custom"], horizontal=True)
 
         custom_start = custom_end = None
         if range_choice == "Custom":
@@ -128,7 +120,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("⭐ Favorites")
-    fav_label = st.text_input("Label (optional)", key="fav_label", placeholder="e.g., Core S&P 500")
+    fav_label = st.text_input("Label the Ticker that has been loaded (optional)", key="fav_label", placeholder="Enter Here")
 
     if st.button("Add current symbol to favorites", use_container_width=True):
         if selected_symbol:
@@ -183,7 +175,9 @@ else:
 
 # Name for chart title (optional polish)
 if selected_symbol and not st.session_state.selected_name:
-    st.session_state.selected_name = get_company_name_from_yf(selected_symbol)
+    name = get_company_name_from_yf(selected_symbol)
+    if name:
+        st.session_state.selected_name = name
 selected_name = st.session_state.selected_name
 
 left, right = st.columns((7, 5))
@@ -339,5 +333,8 @@ with st.expander("Notes & Tips"):
     st.markdown(
         "- Input must be a **ticker symbol** (no company names).\n"
         "- For Canadian symbols, include **.TO**.\n"
-        "- If you get no data, the ticker is likely wrong or missing the exchange suffix."
+        "- If you get no data, the ticker is likely wrong or missing the exchange suffix.\n"
+        "- May need to reload the application if ticker not loading as yFinance might need to reload the data.\n"
+        "- Under Favorites, you can rename a selected Ticker, not choose a new one.\n"
+        "- Adjusted Prices means that dividends are included when displaying the tickers data"
     )
