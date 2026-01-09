@@ -24,7 +24,12 @@ def make_chart(df: pd.DataFrame, title: str, chart_type: str, show_sma: bool) ->
     if chart_type == "Candlestick (OHLC)" and all(c in df.columns for c in ["Open", "High", "Low", "Close"]):
         fig.add_trace(
             go.Candlestick(
-                x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name="OHLC"
+                x=df.index,
+                open=df["Open"],
+                high=df["High"],
+                low=df["Low"],
+                close=df["Close"],
+                name="OHLC",
             )
         )
     elif pcol is not None:
@@ -56,25 +61,40 @@ def make_compare_chart(prices: pd.DataFrame, title: str) -> go.Figure:
     if prices is None or prices.empty:
         return fig.update_layout(title="No data for comparison")
 
-    prices = prices.sort_index().copy()
-    prices = prices.ffill() 
+    prices = prices.sort_index()
+
+    # Find first valid date for each ticker
+    first_dates = []
+    for col in prices.columns:
+        s = prices[col].dropna()
+        if not s.empty:
+            first_dates.append(s.index[0])
+
+    if not first_dates:
+        return fig.update_layout(title="No data for comparison")
+
+    # Use overlapping window
+    common_start = max(first_dates)
+    prices = prices.loc[common_start:].ffill()
+
+    if prices.empty or len(prices) < 2:
+        return fig.update_layout(title="Not enough overlapping data")
 
     base = prices.iloc[0].replace(0, np.nan)
     norm = (prices / base) * 100.0
 
     for col in norm.columns:
-        series = norm[col].dropna()
-        if not series.empty:
-            fig.add_trace(go.Scatter(x=series.index, y=series.values, mode="lines", name=str(col)))
+        s = norm[col].dropna()
+        if not s.empty:
+            fig.add_trace(go.Scatter(x=s.index, y=s.values, mode="lines", name=str(col)))
 
     fig.update_layout(
-        title=f"{title} (Indexed to 100)",
+        title=title + " (Indexed to 100)",
         xaxis_title="Date",
         yaxis_title="Index (Start = 100)",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=30, t=60, b=40),
-        xaxis=dict(rangeslider=dict(visible=False)),
     )
     return fig
 
@@ -85,13 +105,9 @@ def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
     if returns is None or returns.empty:
         return fig.update_layout(title="No annual returns to display")
 
-    idx = returns.index
-    if isinstance(idx, pd.DatetimeIndex):
-        years = [str(y) for y in idx.year]
-    else:
-        years = [str(y) for y in idx]
-
+    years = [str(y) for y in returns.index]
     z = [list(returns.values * 100.0)]
+
     fig.add_trace(
         go.Heatmap(
             z=z,
@@ -102,6 +118,7 @@ def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
             colorbar=dict(title="Return %"),
         )
     )
+
     fig.update_layout(
         title=f"{symbol.upper()} — Annual Returns",
         xaxis_title="Year",
@@ -109,7 +126,6 @@ def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
         margin=dict(l=40, r=30, t=60, b=40),
     )
     return fig
-
 
 
 # Build a rolling annualized volatility chart from daily returns.
@@ -127,7 +143,14 @@ def rolling_vol_chart(df: pd.DataFrame, window: int, symbol: str) -> go.Figure:
         return fig.update_layout(title="Not enough data for rolling stats")
 
     roll_vol = daily.rolling(window).std() * np.sqrt(252)
-    fig.add_trace(go.Scatter(x=roll_vol.index, y=roll_vol, mode="lines", name=f"Rolling vol ({window}d)"))
+    fig.add_trace(
+        go.Scatter(
+            x=roll_vol.index,
+            y=roll_vol,
+            mode="lines",
+            name=f"Rolling vol ({window}d)",
+        )
+    )
 
     fig.update_layout(
         title=f"{symbol.upper()} — Rolling Volatility ({window} day)",
