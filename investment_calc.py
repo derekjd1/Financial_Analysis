@@ -14,13 +14,13 @@ def money(x: float | None) -> str:
     return f"${x:,.2f}" if x is not None else "—"
 
 
-#     Compute a yearly projection given a constant annual rate and annual contributions.
+# Compute a yearly projection given a constant annual rate and annual contributions.
 def investment_projection(
     principal: float,
     annual_return_pct: float,
     annual_contrib: float,
     years: int,
-    contrib_timing: str = "End",  # "End" (ordinary annuity) or "Beginning" (annuity due)
+    contrib_timing: str = "End",  
 ) -> tuple[pd.DataFrame, float, float, float]:
     r = max(annual_return_pct / 100.0, 0.0)
     years = max(int(years), 0)
@@ -103,8 +103,7 @@ def _ending_pie_chart(start_amt: float, total_contribs: float, total_interest: f
 
 # Render the full calculator UI inside the current Streamlit container/tab.
 def render_investment_calculator_tab() -> None:
-    st.caption(
-    )
+    st.caption("Project your investment growth with annual contributions and a constant expected return.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
