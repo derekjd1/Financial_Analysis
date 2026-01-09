@@ -323,5 +323,5 @@ with st.expander("Notes & Tips"):
         "- If you get no data, the ticker is likely wrong or missing the exchange suffix.\n"
         "- May need to reload the application if ticker not loading as yFinance might need to reload the data.\n"
         "- Under Favorites, you can rename a selected Ticker, not choose a new one.\n"
-        "- Adjusted Prices means that dividends are included when displaying the tickers data"
+        "- Adjusted prices account for splits/dividends when available (recommended for return calculations)."
     )
