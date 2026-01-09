@@ -1,25 +1,25 @@
 from __future__ import annotations
-
 from datetime import datetime
 from io import BytesIO
 from typing import Dict, Optional, Callable
-
 import plotly.graph_objects as go
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+# reporting.py — PDF generation for the app
 
+# Convert Plotly figure to an ImageReader using kaleido.
 def _fig_to_imgreader(fig: go.Figure) -> Optional[ImageReader]:
-    """Convert Plotly figure to an ImageReader using kaleido."""
     try:
-        png = fig.to_image(format="png", scale=2)  # requires 'kaleido'
+        png = fig.to_image(format="png", scale=2)
         return ImageReader(BytesIO(png))
     except Exception:
         return None
 
-
+# Generate a multi-page PDF report summarizing metrics and charts
+# for the selected ticker and date range, and return the PDF as bytes.
 def generate_pdf_report(
     symbol: str,
     range_choice: str,
@@ -29,7 +29,6 @@ def generate_pdf_report(
     fig_rolling: Optional[go.Figure],
     pct_fmt: Callable[[Optional[float]], str],
 ) -> bytes:
-    """Build a multi-page PDF and return bytes."""
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
     c.setTitle(f"Finance Report: {symbol.upper()}")
@@ -52,7 +51,6 @@ def generate_pdf_report(
 
     y = header()
 
-    # Summary metrics
     lines = [
         "Last Price: see chart tooltip for most recent close",
         f"Total Return: {pct_fmt(metrics.get('return_pct'))}",
@@ -78,19 +76,17 @@ def generate_pdf_report(
     def place_fig(figure: go.Figure, title: str, y_pos: float) -> float:
         imgR = _fig_to_imgreader(figure)
         if imgR is None:
-            # If image export fails, skip gracefully
             return y_pos
 
         iw, ih = imgR.getSize()
         max_w = W - 2 * M
         tgt_h = (max_w * ih) / iw
 
-        # Clamp overly tall images to page height
         max_h = H - 2 * M - 60
         if tgt_h > max_h:
             tgt_h = max_h
 
-        needed = tgt_h + 28  # title + padding
+        needed = tgt_h + 28 
         if y_pos - needed < M:
             y_loc = new_page(title)
         else:

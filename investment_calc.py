@@ -1,5 +1,3 @@
-# investment_calc.py — Self-contained Investment Calculator tab for the Streamlit app
-
 from __future__ import annotations
 
 from typing import Tuple, List, Dict
@@ -8,12 +6,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+# investment_calc.py — Self-contained Investment Calculator tab for the Streamlit app
 
+
+# Format a float as currency.
 def money(x: float | None) -> str:
-    """Format a float as currency."""
     return f"${x:,.2f}" if x is not None else "—"
 
 
+#     Compute a yearly projection given a constant annual rate and annual contributions.
 def investment_projection(
     principal: float,
     annual_return_pct: float,
@@ -21,15 +22,6 @@ def investment_projection(
     years: int,
     contrib_timing: str = "End",  # "End" (ordinary annuity) or "Beginning" (annuity due)
 ) -> tuple[pd.DataFrame, float, float, float]:
-    """
-    Compute a yearly projection given a constant annual rate and annual contributions.
-
-    Returns:
-        df (pd.DataFrame): Yearly rows with Balance, cumulative contributions & interest.
-        end_balance (float)
-        total_contribs (float)
-        total_interest (float)
-    """
     r = max(annual_return_pct / 100.0, 0.0)
     years = max(int(years), 0)
 
@@ -40,17 +32,14 @@ def investment_projection(
     rows: List[Dict] = []
 
     for yr in range(1, years + 1):
-        # Contribution at beginning (annuity due)
         if contrib_timing == "Beginning" and annual_contrib > 0:
             balance += annual_contrib
             contribs_cum += annual_contrib
 
-        # Annual growth
         interest = balance * r
         balance += interest
         interest_cum += interest
 
-        # Contribution at end (ordinary annuity)
         if contrib_timing == "End" and annual_contrib > 0:
             balance += annual_contrib
             contribs_cum += annual_contrib
@@ -69,8 +58,8 @@ def investment_projection(
     return df, balance, contribs_cum, total_interest
 
 
+# Plot projected balance over time.
 def _growth_line_chart(df_proj: pd.DataFrame) -> go.Figure:
-    """Plot projected balance over time."""
     fig = go.Figure()
     if df_proj.empty:
         fig.update_layout(title="No projection to display")
@@ -93,8 +82,8 @@ def _growth_line_chart(df_proj: pd.DataFrame) -> go.Figure:
     return fig
 
 
+# Plot ending composition pie (principal vs. contributions vs. interest).
 def _ending_pie_chart(start_amt: float, total_contribs: float, total_interest: float) -> go.Figure:
-    """Plot ending composition pie (principal vs. contributions vs. interest)."""
     fig = go.Figure(
         data=[
             go.Pie(
@@ -112,12 +101,9 @@ def _ending_pie_chart(start_amt: float, total_contribs: float, total_interest: f
     return fig
 
 
+# Render the full calculator UI inside the current Streamlit container/tab.
 def render_investment_calculator_tab() -> None:
-    """
-    Render the full calculator UI inside the current Streamlit container/tab.
-    """
     st.caption(
-        "Project your investment growth with annual contributions and a constant expected return."
     )
 
     c1, c2, c3 = st.columns(3)
@@ -153,14 +139,12 @@ def render_investment_calculator_tab() -> None:
         contrib_timing=timing,
     )
 
-    # KPI row
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("End Balance", money(end_bal))
     k2.metric("Starting Amount", money(start_amt))
     k3.metric("Total Contributions", money(total_contribs))
     k4.metric("Total Interest", money(total_interest))
 
-    # Charts
     st.plotly_chart(_growth_line_chart(df_proj), use_container_width=True)
     st.plotly_chart(_ending_pie_chart(start_amt, total_contribs, total_interest), use_container_width=True)
 

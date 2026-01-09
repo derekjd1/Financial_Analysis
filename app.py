@@ -19,6 +19,7 @@ st.title("📈 Finance Analyzer — Stocks & ETFs")
 
 conn = get_conn()
 
+# Safely trigger a Streamlit rerun
 def safe_rerun() -> None:
     try:
         st.rerun()
@@ -37,9 +38,9 @@ if "query_input" not in st.session_state:
     st.session_state.query_input = ""
 
 
+# Cached yfinance name lookup (for chart title only).
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def get_company_name_from_yf(symbol: str) -> str:
-    """Cached yfinance name lookup (for chart title only)."""
     try:
         t = yf.Ticker(symbol)
         info = getattr(t, "info", {}) or {}
@@ -54,12 +55,8 @@ def get_company_name_from_yf(symbol: str) -> str:
         return ""
 
 
+# Simple validation: ticker only (no spaces) allow letters/numbers and:.-^
 def is_valid_ticker(user_input: str) -> bool:
-    """
-    Simple validation:
-    - ticker only (no spaces)
-    - allow letters/numbers and: . - ^
-    """
     s = (user_input or "").strip()
     if not s:
         return False
@@ -70,9 +67,7 @@ def is_valid_ticker(user_input: str) -> bool:
     return all(ch in allowed for ch in s_up)
 
 
-# ----------------------------
 # Sidebar
-# ----------------------------
 with st.sidebar:
     st.subheader("Search (Ticker only)")
 
@@ -155,17 +150,13 @@ st.markdown(
     "For Canadian tickers, include **.TO** (example: `BNS.TO`, `XEQT.TO`)."
 )
 
-# ----------------------------
-# Resolve date range
-# ----------------------------
+# date range
 if range_choice == "Custom":
     start, end, period = custom_start, custom_end, None
 else:
     start, end, period = compute_date_range(range_choice)
 
-# ----------------------------
 # Fetch history
-# ----------------------------
 if not selected_symbol:
     st.warning("Please enter a ticker symbol to load data.")
     hist = pd.DataFrame()
@@ -173,7 +164,7 @@ else:
     with st.spinner(f"Loading {selected_symbol}…"):
         hist = get_history(selected_symbol, start, end, period, interval, auto_adjust)
 
-# Name for chart title (optional polish)
+# Name for chart title
 if selected_symbol and not st.session_state.selected_name:
     name = get_company_name_from_yf(selected_symbol)
     if name:
@@ -242,9 +233,8 @@ with right:
             use_container_width=True
         )
 
-# ----------------------------
-# Tabs
-# ----------------------------
+
+# Tabs for interactive options
 st.divider()
 st.subheader("📊 Analytics & Tools")
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -264,7 +254,6 @@ with tab1:
     base_sym = [selected_symbol.upper()] if selected_symbol else []
     symbols = base_sym + [s.upper() for s in compare_favs] + manual_syms
 
-    # de-dupe, keep order
     seen = set()
     ordered = []
     for s in symbols:
@@ -299,9 +288,7 @@ with tab3:
 with tab4:
     render_investment_calculator_tab()
 
-# ----------------------------
-# PDF
-# ----------------------------
+# PDF Generation
 st.divider()
 if hist.empty:
     st.info("Load a symbol to enable report generation.")

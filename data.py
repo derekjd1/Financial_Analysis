@@ -7,8 +7,8 @@ import yfinance as yf
 
 # data.py — fetching price data via yfinance (ticker-only)
 
+# Map a UI date-range label (YTD, 1Y, 5Y, MAX) to yfinance-compatible
 def compute_date_range(label: str, today: Optional[date] = None) -> Tuple[Optional[date], Optional[date], Optional[str]]:
-    """Return (start, end, period) for yfinance."""
     if today is None:
         today = date.today()
 
@@ -24,6 +24,8 @@ def compute_date_range(label: str, today: Optional[date] = None) -> Tuple[Option
     return None, None, None
 
 
+# Download and normalize historical price data for a single ticker using yfinance,
+# handling date ranges, column formats, and index cleanup.
 @st.cache_data(show_spinner=True, ttl=300)
 def get_history(
     symbol: str,
@@ -76,6 +78,8 @@ def get_history(
     return df
 
 
+# Fetch adjusted close prices for multiple tickers and align them
+# into a single DataFrame for comparison charts.
 def get_prices_for(
     symbols: List[str],
     start: Optional[date],

@@ -5,18 +5,12 @@ import pandas as pd
 
 # analytics.py — calculations/metrics
 
+# Format a decimal value (e.g., 0.1234) as a percent string for UI display.
 def pct(x: Optional[float]) -> str:
     return f"{x*100:.2f}%" if x is not None else "—"
 
 
-def _normalize_time_index(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index, errors="coerce")
-    df = df.sort_index()
-    return df[~df.index.isna()]
-
-
+# Compute summary performance metrics (total return, CAGR, annualized volatility, max drawdown)
 def compute_metrics(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     if df is None or df.empty:
         return {"return_pct": None, "cagr": None, "volatility": None, "max_drawdown": None}
@@ -45,8 +39,9 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     }
 
 
+# Compute year-by-year total returns by taking the last adjusted close of each year
+# and calculating percent change between years.
 def annual_returns(df: pd.DataFrame) -> pd.Series:
-    """Compute annual total returns from Adj Close for one symbol history."""
     if df.empty or "Adj Close" not in df:
         return pd.Series(dtype="float64")
 

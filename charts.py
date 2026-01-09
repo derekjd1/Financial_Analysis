@@ -3,7 +3,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+# charts.py — Plotly chart builders
 
+# Select the appropriate price column from a DataFrame
 def _price_col(df: pd.DataFrame) -> str | None:
     for c in ("Adj Close", "Close"):
         if c in df.columns:
@@ -11,6 +13,7 @@ def _price_col(df: pd.DataFrame) -> str | None:
     return None
 
 
+# Build the main price chart (line or candlestick) with optional moving averages.
 def make_chart(df: pd.DataFrame, title: str, chart_type: str, show_sma: bool) -> go.Figure:
     fig = go.Figure()
     if df is None or df.empty:
@@ -47,6 +50,7 @@ def make_chart(df: pd.DataFrame, title: str, chart_type: str, show_sma: bool) ->
     return fig
 
 
+# Build a normalized comparison chart (indexed to 100) for multiple symbols.
 def make_compare_chart(prices: pd.DataFrame, title: str) -> go.Figure:
     fig = go.Figure()
     if prices is None or prices.empty:
@@ -75,6 +79,7 @@ def make_compare_chart(prices: pd.DataFrame, title: str) -> go.Figure:
     return fig
 
 
+# Build a heatmap showing year-by-year total returns for a single symbol.
 def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
     fig = go.Figure()
     if returns is None or returns.empty:
@@ -106,6 +111,8 @@ def make_returns_heatmap(returns: pd.Series, symbol: str) -> go.Figure:
     return fig
 
 
+
+# Build a rolling annualized volatility chart from daily returns.
 def rolling_vol_chart(df: pd.DataFrame, window: int, symbol: str) -> go.Figure:
     fig = go.Figure()
     if df is None or df.empty:
